@@ -1,7 +1,3 @@
-/**
- * Created by yolo on 26.08.15.
- */
-
 import scala.xml.XML
 import scalaj.http._
 import org.json4s._

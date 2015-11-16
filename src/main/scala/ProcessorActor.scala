@@ -1,74 +1,106 @@
 import akka.actor.{Props, Actor}
-import akka.actor.Actor.Receive
-import Toolbox._
-import com.sun.xml.internal.ws.resources.SenderMessages
-import scala.util.Try
-import scala.collection.immutable.StringOps
+import org.mongodb.scala._
+import org.mongodb.scala.model.Filters._
+import org.mongodb.scala.bson._
+import org.mongodb.scala.Document
+import scala.util.{Random, Try}
 
 
 sealed abstract class AbstractCmd
-
-case class DoubleCommand(id: String, msg: String) extends AbstractCmd
 
 case class HelpCommand(id: String) extends AbstractCmd
 
 case class YoloCommand(id: String, msg: String) extends AbstractCmd
 
-case class BadCommand(id: String) extends AbstractCmd
-
 case class FeatureCommand(id: String, feature: String) extends AbstractCmd
-
-case class GreetingCommand(id: String) extends AbstractCmd
 
 case class SwitchCommand(id: String, msg: String, lastMsg: String) extends AbstractCmd
 
-case class LastMsgTest(id: String, msg: String) extends AbstractCmd
+case class DiceCommand(id: String, left: String, right: String, names: String) extends AbstractCmd
 
-case class NoCommand() extends AbstractCmd
+case class LearnCommand(id: String, keyword: String, text: String) extends AbstractCmd
 
-class ProcessorActor extends Actor {
+case class UserCommand(id: String, msg: String) extends AbstractCmd
+
+case class WrongCommand() extends AbstractCmd
+
+class ProcessorActor(val db: MongoDatabase) extends Actor {
   val apiActor = context.system.actorSelection("/user/apiActor")
+  val collection: MongoCollection[Document] = db.getCollection("dick")
 
   override def receive: Receive = {
-    case DoubleCommand(id, args) =>
-      val doubled: Double = Try(args.toDouble).toOption.flatMap(x => Option(x * 2)).getOrElse(0)
-      apiActor ! SendMessage(id, s"Doubled $args: " + doubled.toString)
-    case LastMsgTest(id, msg) => apiActor ! SendMessage(id, "Last: " + msg)
     case HelpCommand(id) => apiActor ! SendMessage(id,
       """
-        |B-Bot v1.4.8.8.1.4
-        |Когда-нибудь он будет полезен
-        |Формат обращения: буги/вуги/boogie/woogie %команда% [%аргументы%]
+        |BoogieBot v4
+        |Возможно, он уже полезен
+        |
+        |Формат обращения: буги/вуги/boogie/woogie/б/b/. %команда% [%аргументы%]
         |На данный момент доступные команды:
-        |switch/свич [%текст%] - перевести текст вида 'ghbdtn ehjl' в 'привет урод',
+        |
+        |learn/учи %слово% %текст% -- буги запоминает вариант ответа на %слово%(%обращение% %слово% вернет %текст%)
+        |
+        |switch/свич [%текст%] - перевести текст вида 'ghbdtn ehjl' в 'привет урод' или обратно,
         |---Если текст не задан, переведено будет последнее сообщение в чате(исключая команду)
-        |double %число% - удвоить заданное число(я не знаю, зачем)
         |help/хелп - вывести это сообщение
+        |
         |запили %фича% - отправить реквест на новую фичу. Возможно, вас услышат
         |
-        |Последние исправления(27.10.2015):
-        |-Работа с последними сообшениями(дополнена команда Switch)
+        |Бросок дайса: %обращение% XdY -> бросок х костей с y гранями и вернуть сумму
+        |---Выполнить комбинацию XdY можно несколько раз, присвоив каждой сумме имя: boogie 1d6 Шавуха Бк Лапша
+        |
+        |
+        |Последние исправления(16.11.2015):
+        |-Бота можно научить простым ответочкам
       """.stripMargin)
     case YoloCommand(id, args) => apiActor ! SendMessage(id, args.toUpperCase)
-    case BadCommand(id) => apiActor ! SendMessage(id, "Солнышко ты мое рваное, а не пойти ли тебе сменить фамилию")
     case FeatureCommand(id, feature) =>
       apiActor ! SendMessage("2873432" , "Feature request: " + feature)
       apiActor ! SendMessage(id, "Запрос отправлен. Please wait patiently.")
-    case GreetingCommand(id) => apiActor ! SendMessage(id, "Привет!")
     case SwitchCommand(id, args, lastMsg) => apiActor ! SendMessage(id,
       "Switched: " + jcukenSwitch(if (args.length == 0) lastMsg else args))
+    case DiceCommand(id, l, r, names) => apiActor ! SendMessage(id,
+      names.split(" ").foldLeft(""){(acc, x) => acc + x + ": " + roll(l, r) + "\n"}
+    )
+    case LearnCommand(id, kw, txt) => {
+      collection.insertOne(Document("keyword" -> kw, "message" -> (">" + txt))).subscribe(new Observer[Completed] {
+        override def onNext(result: Completed): Unit = println(s"onNext: $result")
+        override def onError(e: Throwable): Unit = println(s"onError: $e")
+        override def onComplete(): Unit = println("onComplete")
+      })
+      apiActor ! SendMessage(id, "Got it: " + kw)
+    }
+    case UserCommand(id, msg) => {
+      collection.find(equal("keyword", msg)).collect().subscribe((results: Seq[Document]) => {
+        results.size match {
+          case x if x > 1 => {
+            val rnd = new Random()
+            apiActor ! SendMessage(id, results(rnd.nextInt(x))("message").asString().getValue)
+          }
+          case 1 => apiActor ! SendMessage(id, results.head("message").asString().getValue)
+          case 0 =>
+        }
+      })
+    }
     case _ =>
   }
 
   def jcukenSwitch(msg: String): String = {
-    val lol = msg.foldLeft("": String)((acc, x) => {acc + ProcessorActor.keyMap.getOrElse(x, x)})
-    println(lol)
-    lol
+    if (ProcessorActor.ruKeyboard.contains(msg(0))) {
+      msg.foldLeft("": String)((acc, x) => {acc + ProcessorActor.ruEnMap.getOrElse(x, x)})
+    } else {
+      msg.foldLeft("": String)((acc, x) => {acc + ProcessorActor.enRuMap.getOrElse(x, x)})
+    }
+  }
+
+  def roll(l: String, r: String): String = {
+    val rnd = new Random()
+    (1 to l.toInt map { _ => rnd.nextInt(r.toInt) + 1 } sum).toString
   }
 }
 
 object ProcessorActor {
   val ruKeyboard = """йцукенгшщзхъфывапролджэячсмитьбю.ЙЦУКЕНГШЩЗХЪФЫВАПРОЛДЖЭЯЧСМИТЬБЮ,"""
   val enKeyboard = """qwertyuiop[]asdfghjkl;'zxcvbnm,./QWERTYUIOP{}ASDFGHJKL:"ZXCVBNM<>?"""
-  val keyMap = enKeyboard zip ruKeyboard toMap
+  val enRuMap = enKeyboard zip ruKeyboard toMap
+  val ruEnMap = ruKeyboard zip enKeyboard toMap
 }

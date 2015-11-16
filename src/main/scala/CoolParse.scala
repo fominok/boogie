@@ -1,19 +1,24 @@
 import scala.util.parsing.combinator.RegexParsers
 
 class CoolParse(id: String, lastMsgs: Map[String, String]) extends RegexParsers {
-  def expr: Parser[AbstractCmd] = greeting ~> opt(""",\s*""".r) ~> statement
-  def greeting = """(?>[БбвВ]уги|[bBwW]oogie)""".r
-  def statement = cmd ~ args ^^ {
-    case "yolo" ~ args => YoloCommand(id, args)
-    case "double" ~ args => DoubleCommand(id, args)
+  val learnPattern = """(^.*?)\s+(.*$)""".r
+  def expr: Parser[AbstractCmd] = greeting ~> opt(""",\s*""".r) ~> (statement | diceShortcut)
+  def greeting = """(?>[БбвВ]уги|[bBwW]oogie|б|b|\.)""".r
+  def statement: Parser[AbstractCmd] = cmd ~ args ^^ {
+    case ("yolo" | "йоло") ~ args => YoloCommand(id, args)
     case ("help" | "хелп") ~ _ => HelpCommand(id)
-    case ("соси" | "пидр" | "говно" |"не очень") ~ _ => BadCommand(id)
-    case "запили" ~ feature => FeatureCommand(id, feature)
-    case "привет" ~ _ => GreetingCommand(id)
-    case ("свич" | "switch") ~ text => SwitchCommand(id, text, lastMsgs(id))
-    case ("ласт" | "last") ~ _ => LastMsgTest(id, lastMsgs(id))
-    case _ ~ _ => NoCommand()
+    case "запили" ~ args => FeatureCommand(id, args)
+    case ("свич" | "switch") ~ args => SwitchCommand(id, args, lastMsgs(id))
+    case ("учи" | "learn") ~ args => args match {
+      case learnPattern(key, phrase) => LearnCommand(id, key, phrase)
+      case _ => WrongCommand()
+    }
+    case x ~ _ => UserCommand(id, x)
   }
+  def diceShortcut: Parser[AbstractCmd] = diceValue ~ "d" ~ diceValue ~ opt("""\s+""".r) ~ args ^^ {
+    case left ~ _ ~ right ~ _ ~ args => DiceCommand(id, left, right, args)
+  }
+  def diceValue = """\d+""".r
   def cmd = """[а-яА-Яa-zA-Z]+""".r
   def args = """.*""".r
 }

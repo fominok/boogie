@@ -1,11 +1,8 @@
-/**
- * Created by yolo on 02.09.15.
- */
-
 import akka.actor._
 import org.json4s._
 import org.json4s.jackson.JsonMethods._
 import Toolbox._
+import org.mongodb.scala.MongoClient
 
 import scala.annotation.tailrec
 import scala.util.{Try, Success, Failure}
@@ -16,9 +13,11 @@ object LongPoll {
   implicit val formats = DefaultFormats
 
   def init(token: String): Unit = {
+    val mdbClient = MongoClient("mongodb://127.0.0.1")
+
     val system = ActorSystem("system")
     val apiActor = system.actorOf(Props(classOf[ApiActor], token), "apiActor")
-    val processorActor = system.actorOf(Props(classOf[ProcessorActor]), "procActor")
+    val processorActor = system.actorOf(Props(classOf[ProcessorActor], mdbClient.getDatabase("test")), "procActor")
     longPollStart(token, processorActor)
   }
 
@@ -59,7 +58,7 @@ object LongPoll {
         val id = incoming(3).extract[String]
         val msg = incoming(6).extract[String]
         val parser = new CoolParse(id, lastMsgMap)
-        val cmd = parser.parseAll(parser.expr, msg).getOrElse(NoCommand)
+        val cmd = parser.parseAll(parser.expr, msg).getOrElse(UserCommand)
 
         processorActor ! cmd
       }

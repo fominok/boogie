@@ -6,9 +6,6 @@ sealed abstract class ApiRequest
 
 case class SendMessage(id: String, msg: String) extends ApiRequest
 
-/**
- * Created by yolo on 9/3/15.
- */
 class ApiActor(val token: String) extends Actor {
   override def receive: Receive = {
     case SendMessage(id, msg) => {
